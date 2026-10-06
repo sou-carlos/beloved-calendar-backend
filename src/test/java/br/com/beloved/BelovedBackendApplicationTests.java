@@ -32,6 +32,7 @@ class BelovedBackendApplicationTests {
     int port;
     @Autowired UserRepository users;
     @Autowired PasswordEncoder passwords;
+    @Autowired jakarta.servlet.ServletContext servletContext;
 
     private CookieManager cookies;
     private HttpClient client;
@@ -93,6 +94,25 @@ class BelovedBackendApplicationTests {
         assertThat(post("/logout", Map.of(), beforeLogin).statusCode()).isEqualTo(403);
         assertThat(post("/logout", Map.of(), csrf()).statusCode()).isEqualTo(204);
         assertThat(get("/me").statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void persistentLoginSurvivesNewClientAndLogoutRevokesSavedCookie() throws Exception {
+        assertThat(servletContext.getSessionTimeout()).isEqualTo(30 * 24 * 60);
+        assertThat(post("/register", registration("persistent@example.com"), csrf()).statusCode()).isEqualTo(201);
+        assertThat(post("/logout", Map.of(), csrf()).statusCode()).isEqualTo(204);
+        var login = post("/login", registration("persistent@example.com"), csrf());
+        assertThat(login.statusCode()).isEqualTo(200);
+        assertThat(login.headers().allValues("Set-Cookie").toString().toLowerCase())
+            .contains("max-age=2592000", "httponly", "samesite=lax");
+        var savedCookie = "BELOVED_SESSION=" + sessionId();
+        // A reopened browser restores only its persistent cookie, with no client authentication state.
+        var reopened = HttpClient.newHttpClient();
+        var request = HttpRequest.newBuilder(uri("/me")).header("Cookie", savedCookie).GET().build();
+        assertThat(reopened.send(request, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(200);
+        assertThat(post("/logout", Map.of(), csrf()).statusCode()).isEqualTo(204);
+        // Even a retained copy of the persistent cookie must stop working after logout.
+        assertThat(reopened.send(request, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(401);
     }
 
     @Test

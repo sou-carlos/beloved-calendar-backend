@@ -33,7 +33,7 @@ Inicie apenas o banco com `docker compose up -d postgres`. Configure `JAVA_HOME`
 
 Cadastro recebe `{ "name": "Marina", "email": "marina@example.com", "password": "senha-com-8-caracteres" }`. Login recebe email e password. Nome: 2–80 caracteres; email: até 254; senha: 8–128 no cadastro. Email é normalizado. Todos os POST exigem o token obtido de `/csrf` no header indicado. Enviar cookies (`credentials: include`) e buscar novo token após login/logout. O frontend já faz isso automaticamente.
 
-Senhas usam PBKDF2; nunca são retornadas. Cookie `BELOVED_SESSION` HttpOnly e SameSite=Lax, sessão de 8 horas, troca de ID no login e invalidação no logout. Sessões ficam na memória da API: reiniciar o backend exige novo login, sem apagar contas. CORS permite apenas origens configuradas. Migrações Flyway criam o schema; Hibernate apenas o valida.
+Senhas usam PBKDF2; nunca são retornadas. Cookie `BELOVED_SESSION` HttpOnly e SameSite=Lax, cookie persistente com validade de 30 dias (inclusive após fechar o navegador), sessão com limite de inatividade de 30 dias, troca de ID no login e invalidação no logout. Sessões ficam na memória da API: reiniciar o backend exige novo login, sem apagar contas. CORS permite apenas origens configuradas. Migrações Flyway criam o schema; Hibernate apenas o valida.
 
 Erros retornam `{ code, message, fieldErrors? }`: 400 validação, 401 credenciais/sessão, 403 CSRF/CORS, 409 email duplicado. Amigos e presentes agora possuem sincronização por conta; os dados de visitante continuam apenas no navegador. Veja a seção de sincronização abaixo.
 
@@ -65,6 +65,6 @@ No navegador, visitante usa o banco legado; cada conta usa seu próprio IndexedD
 
 A importação é opcional, copia os dados de visitante e preserva IDs. Repeti-la não sobrescreve registros já conhecidos nem recria excluídos. Conflitos preservam as versões e exigem escolha explícita; é possível manter a versão da conta e criar uma nova cópia da local. Alterações em registros diferentes não entram em conflito.
 
-Sincronização ao abrir, salvar, recuperar conexão, voltar à janela e a cada 15 segundos enquanto a página está visível; também há botão manual. Falhas mantêm a fila; rejeições de validação não bloqueiam outros amigos. Não há sincronização garantida com o app fechado.
+Sincronização após login ou restauração inicial de sessão válida, alterações (incluindo importação e resolução de conflitos) e pelo botão “Sincronizar agora”. Não há sincronização periódica, ao focar a janela ou ao recuperar conexão; alterações offline aguardam um desses gatilhos. Falhas mantêm a fila; rejeições de validação não bloqueiam outros amigos. Não há sincronização garantida com o app fechado.
 
 Testes: `mvnw.cmd verify` inclui concorrência, repetição, conflitos, exclusão e isolamento. No frontend, `npm run test:e2e` exercita múltiplos navegadores, importação, reconexão e cache offline.
