@@ -222,6 +222,64 @@ class BelovedBackendApplicationTests {
     }
 
     @Test
+    void syncKeepsEveryAvatarChoiceAndUnknownYear() throws Exception {
+        var account = json(post("/register", registration("avatar@example.com"), csrf())).get("id").asText();
+        var id = java.util.UUID.randomUUID().toString();
+        var avatar = Map.of("hair", "bob", "hairColor", "auburn", "skin", "tan", "eyes", "green", "shirt", "mustard", "age", "old",
+            "hat", "straw", "earrings", "hoop", "glasses", "round", "beard", "lumberjack");
+        assertThat(json(syncPost(change(account, id, 0, person(id, "2000-02-29", true, avatar)), csrf())).get("status").asText()).isEqualTo("accepted");
+        var saved = json(syncGet(account)).get("records").get(0).get("person");
+        assertThat(saved.get("yearUnknown").asBoolean()).isTrue();
+        for (var entry : avatar.entrySet()) assertThat(saved.get("avatar").get(entry.getKey()).asText()).isEqualTo(entry.getValue());
+    }
+
+    @Test
+    void syncAcceptsRecordsFromOlderClients() throws Exception {
+        var account = json(post("/register", registration("older@example.com"), csrf())).get("id").asText();
+        var id = java.util.UUID.randomUUID().toString();
+        // No avatar and no year flag at all, as saved before this feature.
+        assertThat(json(syncPost(change(account, id, 0, Map.of("id", id, "name", "Lia", "birthDate", "1990-05-01", "gifts", java.util.List.of())), csrf()))
+            .get("status").asText()).isEqualTo("accepted");
+        // A face saved before the optional choices existed.
+        var firstFace = Map.of("hair", "bob", "hairColor", "auburn", "skin", "tan", "eyes", "green");
+        assertThat(json(syncPost(change(account, id, 1, person(id, "1990-05-01", false, firstFace)), csrf())).get("status").asText()).isEqualTo("accepted");
+        // An id this server has never heard of, e.g. from a newer app version, is kept as is.
+        var newerFace = Map.of("hair", "future-style", "hairColor", "auburn", "skin", "tan", "eyes", "green");
+        assertThat(json(syncPost(change(account, id, 2, person(id, "1990-05-01", false, newerFace)), csrf())).get("record").get("person").get("avatar").get("hair").asText())
+            .isEqualTo("future-style");
+    }
+
+    @Test
+    void syncDropsAStaleUnknownYearFlag() throws Exception {
+        var account = json(post("/register", registration("stale@example.com"), csrf())).get("id").asText();
+        var id = java.util.UUID.randomUUID().toString();
+        // An older client edited the date to a real year but kept the flag from before.
+        var result = json(syncPost(change(account, id, 0, person(id, "1995-03-07", true, null)), csrf()));
+        assertThat(result.get("record").get("person").get("yearUnknown").isNull()).isTrue();
+        assertThat(json(syncGet(account)).get("records").get(0).get("person").get("yearUnknown").isNull()).isTrue();
+    }
+
+    @Test
+    void syncRejectsMalformedAvatars() throws Exception {
+        var account = json(post("/register", registration("malformed@example.com"), csrf())).get("id").asText();
+        var id = java.util.UUID.randomUUID().toString();
+        var markup = Map.of("hair", "<b>", "hairColor", "auburn", "skin", "tan", "eyes", "green");
+        assertThat(syncPost(change(account, id, 0, person(id, "2000-02-29", false, markup)), csrf()).statusCode()).isEqualTo(400);
+        var missingRequired = Map.of("hair", "bob", "hairColor", "auburn", "skin", "tan");
+        assertThat(syncPost(change(account, id, 0, person(id, "2000-02-29", false, missingRequired)), csrf()).statusCode()).isEqualTo(400);
+        var tooLong = Map.of("hair", "x".repeat(33), "hairColor", "auburn", "skin", "tan", "eyes", "green");
+        assertThat(syncPost(change(account, id, 0, person(id, "2000-02-29", false, tooLong)), csrf()).statusCode()).isEqualTo(400);
+    }
+
+    private Map<String, Object> person(String id, String birthDate, boolean yearUnknown, Map<String, String> avatar) {
+        var body = new java.util.LinkedHashMap<String, Object>();
+        body.put("id", id); body.put("name", "Lia"); body.put("birthDate", birthDate); body.put("gifts", java.util.List.of());
+        if (yearUnknown) body.put("yearUnknown", true);
+        if (avatar != null) body.put("avatar", avatar);
+        return body;
+    }
+
+    @Test
     void concurrentDevicesCannotOverwriteTheSameVersion() throws Exception {
         var account = json(post("/register", registration("concurrent@example.com"), csrf())).get("id").asText();
         var token = csrf();
