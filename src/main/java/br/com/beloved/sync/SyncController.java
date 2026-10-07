@@ -27,6 +27,22 @@ public class SyncController {
         @Size(max=2048) @Pattern(regexp="(?i)^(https?://.*)?$") String url,
         Boolean purchased) {}
 
+    /** Avatar option ids. Any well-formed id is kept, so faces from newer app versions survive older ones. */
+    private static final String OPTION_ID = "[a-z0-9-]+";
+
+    public record Avatar(
+        @NotBlank @Size(max=32) @Pattern(regexp=OPTION_ID) String hair,
+        @NotBlank @Size(max=32) @Pattern(regexp=OPTION_ID) String hairColor,
+        @NotBlank @Size(max=32) @Pattern(regexp=OPTION_ID) String skin,
+        @NotBlank @Size(max=32) @Pattern(regexp=OPTION_ID) String eyes,
+        // Optional choices added after the first faces were saved.
+        @Size(max=32) @Pattern(regexp=OPTION_ID) String shirt,
+        @Size(max=32) @Pattern(regexp=OPTION_ID) String age,
+        @Size(max=32) @Pattern(regexp=OPTION_ID) String hat,
+        @Size(max=32) @Pattern(regexp=OPTION_ID) String earrings,
+        @Size(max=32) @Pattern(regexp=OPTION_ID) String glasses,
+        @Size(max=32) @Pattern(regexp=OPTION_ID) String beard) {}
+
     public record Person(
         @NotBlank @Size(max=100) String id,
         @NotBlank @Size(max=80) String name,
@@ -36,7 +52,15 @@ public class SyncController {
         @NotNull @Size(max=500) List<@NotNull @Valid Gift> gifts,
         @Size(max=2000) String likes,
         @Size(max=2000) String dislikes,
-        @Size(max=32) String emoji) {}
+        @Size(max=32) String emoji,
+        Boolean yearUnknown,
+        @Valid Avatar avatar) {
+        /** The unknown-year flag only applies to the placeholder year 2000. Older clients can leave it stale after a date edit. */
+        Person normalized() {
+            if (!Boolean.TRUE.equals(yearUnknown) || birthDate.startsWith("2000-")) return this;
+            return new Person(id, name, birthDate, notes, image, gifts, likes, dislikes, emoji, null, avatar);
+        }
+    }
 
     public record Change(@NotNull UUID accountId, @NotNull UUID operationId,
         @NotBlank @Size(max=100) String id, @PositiveOrZero long baseVersion,
@@ -84,7 +108,7 @@ public class SyncController {
         if (current.version() != body.baseVersion()) {
             result = new Result(user, body.operationId(), "conflict", current);
         } else {
-            Entry saved = new Entry(body.id(), current.version() + 1, body.person());
+            Entry saved = new Entry(body.id(), current.version() + 1, body.person() == null ? null : body.person().normalized());
             jdbc.update("INSERT INTO calendar_records (user_id, record_id, version, document) VALUES (?, ?, ?, CAST(? AS jsonb)) "
                 + "ON CONFLICT (user_id, record_id) DO UPDATE SET version = EXCLUDED.version, document = EXCLUDED.document, updated_at = now()",
                 user, saved.id(), saved.version(), saved.person() == null ? null : json.writeValueAsString(saved.person()));
